@@ -1,0 +1,112 @@
+version: 1
+name: pgrust-reyden-inspired-acceptance
+scope:
+  mode: read_only
+  statement: >-
+    These are pgrust engineering targets inspired by public Lakehouse//RT/Reyden
+    claims. They are not Databricks-published percentile definitions or a claim
+    of benchmark equivalence.
+
+reporting:
+  latency_percentiles: [50, 90, 95, 99, 100]
+  open_loop_required: true
+  independent_runs_min: 3
+  raw_results_required: true
+  cache_modes: [cold_metadata, warm_metadata, warm_data]
+  required_dimensions:
+    - commit
+    - dirty_state
+    - rustc
+    - build_profile
+    - kernel
+    - cpu_topology
+    - memory
+    - object_store_provider
+    - object_store_region
+    - table_format_version
+    - dataset_scale
+    - file_size_distribution
+    - query_mix
+
+invariants:
+  source_of_truth: delta_or_iceberg
+  mandatory_import_or_cdc: false
+  cache_must_be_derived_evictable_and_snapshot_versioned: true
+  one_snapshot_per_table_per_query: true
+  unsupported_user_query_must_not_panic: true
+  policy_version_must_be_in_plan_and_result_cache_keys: true
+
+workloads:
+  - id: protocol_session_scale
+    concurrency: [1, 100, 1000, 10000]
+    protocol: extended
+    prepared_statements: true
+    gates:
+      concurrent_sessions_min: 10000
+      process_per_client: false
+      protocol_error_rate_pct_max: 0.0
+      unbounded_memory_growth: false
+
+  - id: hot_selective
+    source_formats: [delta, iceberg]
+    cache_mode: warm_data
+    gates:
+      p50_ms_max: 10
+      p95_ms_max: 50
+      p99_ms_max: 100
+      error_rate_pct_max: 0.01
+
+  - id: analytical_serving_12k_qps
+    source_formats: [delta, iceberg]
+    offered_qps: 12000
+    gates:
+      accepted_qps_min: 12000
+      p95_ms_max: 100
+      p99_ms_max: 200
+      error_rate_pct_max: 0.01
+      queue_growth_unbounded: false
+      load_slope_p95_max: 1.5
+
+  - id: tpch_scale
+    scale_gb: [10, 100, 1000]
+    required_shapes: [scan, multitable_join, aggregation]
+    gates:
+      exact_result_match: true
+      unsupported_panic_count_max: 0
+      report_pruning_ratio: true
+      report_exchange_bytes: true
+
+  - id: tpcds_complexity
+    required_shapes: [deep_join, subquery, window, skew, spill]
+    gates:
+      exact_result_match: true
+      unsupported_panic_count_max: 0
+      report_spill: true
+
+  - id: snapshot_freshness
+    source_formats: [delta, iceberg]
+    concurrent_commits: true
+    gates:
+      mixed_snapshot_result_count_max: 0
+      visibility_slo_seconds_max: 5
+
+  - id: governance
+    gates:
+      authorization_matrix_pass_pct: 100
+      row_filter_matrix_pass_pct: 100
+      column_mask_matrix_pass_pct: 100
+      audit_record_coverage_pct: 100
+
+  - id: overload_and_faults
+    injections:
+      - object_store_timeout
+      - object_store_throttle
+      - credential_expiry
+      - memory_pressure
+      - cpu_saturation
+      - worker_loss
+    gates:
+      cross_snapshot_result_count_max: 0
+      accepted_query_silent_drop_count_max: 0
+      cancellation_must_be_bounded: true
+      deadline_must_be_bounded: true
